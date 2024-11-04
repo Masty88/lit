@@ -673,6 +673,12 @@ export interface Parameter extends PropertyLike {
   rest?: boolean | undefined;
 }
 
+export interface InheritanceInfo {
+  className: string;
+  type: 'superclass' | 'mixin';
+  path?: string;
+}
+
 export interface ReactiveProperty extends PropertyLike {
   /**
    * The property declaration.
@@ -705,6 +711,20 @@ export interface ReactiveProperty extends PropertyLike {
    * with the default semantics or not.
    */
   converter: ts.Node | undefined;
+
+  /**
+   * Indicate if the property is inherited from a superclass or mixin
+   */
+  inherited?: boolean;
+
+  /**
+   * Information about the superclass or mixin that this property is inherited from
+   */
+  inheritedFrom?: {
+    className: string;
+    type: 'superclass' | 'mixin';
+    path?: string;
+  };
 
   // TODO(justinfagnani): hasChanged?
 }
