@@ -85,6 +85,46 @@ export const getProperties = (
     }
   }
 
+  const superClass = getSuperClass(classDeclaration, analyzer);
+  if (superClass && superClass.name) {
+    // Aggiungiamo il controllo su name
+    const superProperties = getProperties(superClass, analyzer);
+    for (const [name, prop] of superProperties) {
+      if (!reactiveProperties.has(name)) {
+        reactiveProperties.set(name, {
+          ...prop,
+          inherited: true,
+          inheritedFrom: {
+            className: superClass.name.text,
+            type: 'superclass',
+            path: superClass.getSourceFile().fileName,
+          },
+        });
+      }
+    }
+  }
+
+  // Process mixin properties
+  const mixinClasses = getMixinClasses(classDeclaration, analyzer);
+  for (const mixinClass of mixinClasses) {
+    if (mixinClass.name) {
+      const mixinProperties = getProperties(mixinClass, analyzer);
+      for (const [name, prop] of mixinProperties) {
+        if (!reactiveProperties.has(name)) {
+          console.log('mixinProperties name ', name);
+          reactiveProperties.set(name, {
+            ...prop,
+            inherited: true,
+            inheritedFrom: {
+              className: mixinClass.name.text,
+              type: 'mixin',
+              path: mixinClass.getSourceFile().fileName,
+            },
+          });
+        }
+      }
+    }
+  }
   // Handle static properties block (initializer or getter).
   if (staticProperties !== undefined) {
     addPropertiesFromStaticBlock(
@@ -97,6 +137,96 @@ export const getProperties = (
   }
 
   return reactiveProperties;
+};
+
+const getSuperClass = (
+  classDeclaration: LitClassDeclaration,
+  analyzer: AnalyzerInterface
+): LitClassDeclaration | undefined => {
+  const {typescript: ts} = analyzer;
+  const heritage = classDeclaration.heritageClauses?.find(
+    (clause) => clause.token === ts.SyntaxKind.ExtendsKeyword
+  );
+  if (heritage?.types.length) {
+    console.log('heritage is ok');
+    const typeChecker = analyzer.program.getTypeChecker();
+    const superType = typeChecker.getTypeAtLocation(
+      heritage.types[0].expression
+    );
+    const superDeclaration = superType.symbol?.declarations?.[0];
+    console.log('superDeclaration before check ', superDeclaration);
+    if (
+      superDeclaration &&
+      ts.isClassDeclaration(superDeclaration) &&
+      superDeclaration.name
+    ) {
+      // Aggiungiamo il controllo che abbia un nome
+      console.log('superDeclaration is ok');
+      return superDeclaration as LitClassDeclaration;
+    } else {
+      console.log('superDeclaration is not ok');
+    }
+  }
+  return undefined;
+};
+
+const getMixinClasses = (
+  classDeclaration: LitClassDeclaration,
+  analyzer: AnalyzerInterface
+): LitClassDeclaration[] => {
+  const {typescript: ts} = analyzer;
+  const mixinClasses: LitClassDeclaration[] = [];
+  const heritageClauses = classDeclaration.heritageClauses;
+
+  if (heritageClauses) {
+    for (const clause of heritageClauses) {
+      for (const typeNode of clause.types) {
+        const expression = typeNode.expression;
+        if (ts.isCallExpression(expression)) {
+          // Get the return type of the mixin function
+          const typeChecker = analyzer.program.getTypeChecker();
+          const signature = typeChecker.getResolvedSignature(expression);
+          if (signature) {
+            const returnType = typeChecker.getReturnTypeOfSignature(signature);
+            const returnTypeSymbol = returnType.getSymbol();
+            if (returnTypeSymbol) {
+              const declarations = returnTypeSymbol.getDeclarations();
+              for (const decl of declarations || []) {
+                if (ts.isClassDeclaration(decl)) {
+                  mixinClasses.push(decl as LitClassDeclaration);
+                  // Recursively collect mixins from the mixin class
+                  mixinClasses.push(
+                    ...getMixinClasses(decl as LitClassDeclaration, analyzer)
+                  );
+                }
+              }
+            }
+          }
+        } else if (
+          ts.isIdentifier(expression) ||
+          ts.isPropertyAccessExpression(expression)
+        ) {
+          // Handle named mixin classes
+          const typeChecker = analyzer.program.getTypeChecker();
+          const mixinType = typeChecker.getTypeAtLocation(expression);
+          const symbol = mixinType.getSymbol();
+          if (symbol) {
+            const declarations = symbol.getDeclarations();
+            for (const decl of declarations || []) {
+              if (ts.isClassDeclaration(decl)) {
+                mixinClasses.push(decl as LitClassDeclaration);
+                // Recursively collect mixins from the mixin class
+                mixinClasses.push(
+                  ...getMixinClasses(decl as LitClassDeclaration, analyzer)
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return mixinClasses;
 };
 
 /**
